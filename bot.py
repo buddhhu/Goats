@@ -164,11 +164,14 @@ class GoatsBot:
 
 async def main():
     while True:
-        for auth_data in open("data.txt", "r", encoding="utf-8").read().split("\n"):
+        with open("data.txt", "r", encoding="utf-8") as file:
+            accounts = [line.strip() for line in file if line.strip()]
+        for _, auth_data in enumerate(accounts, start=1):
             sleep_between_login = random.randint(10, 20)
             logger.info(f"Sleeping for {sleep_between_login}s before login")
             await asyncio.sleep(sleep_between_login)
-            bot = GoatsBot(auth_data)
+            logger.info(f"Account {_}/{len(accounts)}")
+            bot = GoatsBot(auth_data.strip())
             await bot.run()
         logger.info("Sleeping for 60 minutes.")
         await asyncio.sleep(60 * 60)
