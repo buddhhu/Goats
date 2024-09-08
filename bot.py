@@ -2,6 +2,7 @@ from aiohttp import ClientSession
 import json, asyncio, sys, random
 from json.decoder import JSONDecodeError
 from datetime import datetime
+from math import ceil
 from urllib.parse import unquote
 from loguru import logger
 
@@ -15,6 +16,8 @@ logger.add(
     " | <white><b>{message}</b></white>",
 )
 logger = logger.opt(colors=True)
+
+min_amount_for_spin = 20000
 
 
 class GoatsBot:
@@ -75,9 +78,7 @@ class GoatsBot:
             result = []
             for category in resp:
                 for mission in resp[category]:
-                    if not mission.get(
-                        "status", True
-                    ):  # Default to True if status key is missing
+                    if not mission.get("status", True):
                         result.append(
                             {
                                 "id": mission.get("_id"),
@@ -109,7 +110,7 @@ class GoatsBot:
                 )
                 return False
 
-    async def get_checkiin(self) -> dict:
+    async def get_checkin(self) -> dict:
         resp = await self.http.get(f"https://api-checkin.goatsbot.xyz/checkin/user")
         resp = self.decode_json(await resp.text())
         if resp.get("statusCode"):
@@ -131,7 +132,6 @@ class GoatsBot:
             logger.error(f"{self.user_id} | Error checking in | {resp['message']}")
             return False
         else:
-
             if resp.get("status"):
                 logger.success(
                     f"{self.user_id} | Checked in for day {checkin_data['day']} | Bonus: {checkin_data['reward']}"
@@ -141,6 +141,21 @@ class GoatsBot:
                 logger.error(f"{self.user_id} | Failed to checkin. Try again later.")
                 return False
 
+    async def spin_wheel(self, bet_amount: int) -> dict:
+        resp = await self.http.post(
+            "https://api-wheel.goatsbot.xyz/wheel/action",
+            json={"bet_amount": bet_amount, "wheel_seg": "Low"},
+        )
+        resp = self.decode_json(await resp.text())
+        if resp.get("statusCode"):
+            logger.error(
+                f"{self.user_id} | Error playing spin wheel | {resp['message']}"
+            )
+            return False
+        else:
+            if wheel := resp.get("wheel"):
+                return wheel
+
     async def run(self):
         if not await self.login():
             return
@@ -149,15 +164,48 @@ class GoatsBot:
         if missions_to_complete:
             for mission_data in missions_to_complete:
                 await self.complete_mission(mission_data)
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(random.randint(1, 5))
 
-        checkin_data = await self.get_checkiin()
+        checkin_data = await self.get_checkin()
         if checkin_data:
             await self.checkin(checkin_data)
         profile_data = await self.profile_data()
         if profile_data:
             logger.info(
                 f"Account ID: {self.user_id} | Balance: {profile_data.get('balance')} | Age: {profile_data.get('age')} years"
+            )
+        if min_amount_for_spin < int(profile_data.get("balance")):
+            current_balance = profile_data.get("balance")
+            won, lost = 0, 0
+            total_profit = 0
+            max_losses = 2
+
+            while True:
+                bet_amount = random.randint(
+                    ceil((current_balance * 0.1) / 100),
+                    ceil((current_balance * 1) / 100),
+                )
+                result = await self.spin_wheel(bet_amount)
+                if not result.get("is_win"):
+                    total_profit -= bet_amount
+                    logger.error(
+                        f"{self.user_id} | Lost {bet_amount}/{bet_amount} coins | Won: {won} | Lost: {lost} | Profit: {total_profit}"
+                    )
+                    lost += 1
+                    if lost >= max_losses:
+                        logger.error(f"Lost {lost} bets. Will try later.")
+                        break
+                else:
+                    total_profit += result.get("reward") - bet_amount
+                    won += 1
+                    logger.success(
+                        f"{self.user_id} | Won {result.get('reward') - bet_amount}/{bet_amount} coins | Won: {won} | Lost: {lost} | Profit: {total_profit}"
+                    )
+
+                await asyncio.sleep(random.randint(6, 12))
+            profile_data = await self.profile_data()
+            logger.info(
+                f"{self.user_id} | Game Over. Final Balance: {profile_data.get('balance')} | Profit: {total_profit}"
             )
         await self.http.close()
 
