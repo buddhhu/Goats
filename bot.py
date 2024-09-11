@@ -1,5 +1,5 @@
 from aiohttp import ClientSession
-import json, asyncio, sys, random
+import json, asyncio, sys, random, time
 from json.decoder import JSONDecodeError
 from datetime import datetime
 from math import ceil
@@ -18,6 +18,7 @@ logger.add(
 logger = logger.opt(colors=True)
 
 min_amount_for_spin = 20000
+play_spin_wheel = False
 
 
 class GoatsBot:
@@ -78,6 +79,16 @@ class GoatsBot:
             result = []
             for category in resp:
                 for mission in resp[category]:
+                    if category == "SPECIAL MISSION" and mission.get(
+                        "next_time_execute"
+                    ) < int(time.time()):
+                        result.append(
+                            {
+                                "id": mission.get("_id"),
+                                "name": mission.get("name"),
+                                "reward": mission.get("reward"),
+                            }
+                        )
                     if not mission.get("status", True):
                         result.append(
                             {
@@ -158,6 +169,7 @@ class GoatsBot:
 
     async def run(self):
         if not await self.login():
+            await self.http.close()
             return
 
         missions_to_complete = await self.get_missions()
@@ -174,7 +186,7 @@ class GoatsBot:
             logger.info(
                 f"Account ID: {self.user_id} | Balance: {profile_data.get('balance')} | Age: {profile_data.get('age')} years"
             )
-        if min_amount_for_spin < int(profile_data.get("balance")):
+        if play_spin_wheel and min_amount_for_spin < int(profile_data.get("balance")):
             current_balance = profile_data.get("balance")
             won, lost = 0, 0
             total_profit = 0
