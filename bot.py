@@ -1,7 +1,6 @@
 from aiohttp import ClientSession
 import json, asyncio, sys, random, time
 from json.decoder import JSONDecodeError
-from datetime import datetime
 from math import ceil
 from urllib.parse import unquote
 from loguru import logger
@@ -49,11 +48,6 @@ class GoatsBot:
         else:
             _access_token = resp.get("tokens", {}).get("access", {})
             access_token = _access_token.get("token")
-            self.access_token_expiry = int(
-                datetime.fromisoformat(
-                    _access_token["expires"].replace("Z", "+00:00")
-                ).timestamp()
-            )
             self.http.headers["Authorization"] = f"Bearer {access_token}"
             logger.success(f"{self.user_id} | Login successful")
             return True
@@ -233,8 +227,9 @@ async def main():
             logger.info(f"Account {_}/{len(accounts)}")
             bot = GoatsBot(auth_data.strip())
             await bot.run()
-        logger.info("Sleeping for 60 minutes.")
-        await asyncio.sleep(60 * 60)
+        retry_sleep = random.randint(60, 90)
+        logger.info(f"Sleeping for {retry_sleep} minutes.")
+        await asyncio.sleep(retry_sleep * 60)
 
 
 asyncio.run(main())
