@@ -16,13 +16,27 @@ logger.add(
 )
 logger = logger.opt(colors=True)
 
-min_amount_for_spin = 20000
-play_spin_wheel = False
+
+class Config:
+    login_time_btwin_acc = [10, 20]  # seconds
+    hard_sleep = [180, 240]  # Login all accounds after * minutes
+    no_of_login_b4_sleep = 10  # Number of logins before hard sleep
+    soft_sleep = [5, 15]  # Login all accounts to after * minutes to claim 5 min reward
+    min_amount_for_spin = 20000
+    play_spin_wheel = False  # Play easy mode of spin wheel betting game, risky
+    proxy = ""
+    debug = False
 
 
 class GoatsBot:
     def __init__(self, tg_auth_data: str) -> None:
-        self.http = ClientSession()
+        self.http = ClientSession(
+            headers={
+                "User-Agent": "Android/v5.5.5",
+                "Accept": "*/*",
+                "Connection": "keep-alive",
+            }
+        )
         self.auth_data = tg_auth_data
         userdata = json.loads(unquote(tg_auth_data).split("user=")[1].split("&auth")[0])
         self.user_id = userdata.get("id")
@@ -35,13 +49,26 @@ class GoatsBot:
             return {"error": "Error decoding to json", "text": text}
 
     async def login(self) -> bool:
+        resp = await self.http.get(
+            "https://httpbin.org/ip",
+            proxy=Config.proxy or None,
+        )
+        resp = self.decode_json(await resp.text())
+        logger.success(f"IP: {resp.get('origin')}")
         logger.info(f"{self.user_id} | Trying to login...")
         resp = await self.http.post(
             "https://dev-api.goatsbot.xyz/auth/login",
-            data={},
-            headers={"Rawdata": self.auth_data},
+            headers={
+                "User-Agent": "Android/v5.5.5",
+                "Accept": "*/*",
+                "Connection": "keep-alive",
+                "Rawdata": self.auth_data,
+            },
+            proxy=Config.proxy,
         )
         resp = self.decode_json(await resp.text())
+        if Config.debug:
+            logger.debug(resp)
         if resp.get("statusCode"):
             logger.error(f"{self.user_id} | Error while login | {resp['message']}")
             return False
@@ -53,8 +80,12 @@ class GoatsBot:
             return True
 
     async def profile_data(self) -> dict:
-        resp = await self.http.get("https://api-me.goatsbot.xyz/users/me")
+        resp = await self.http.get(
+            "https://api-me.goatsbot.xyz/users/me", proxy=Config.proxy or None
+        )
         resp = self.decode_json(await resp.text())
+        if Config.debug:
+            logger.debug(resp)
         if resp.get("statusCode"):
             logger.error(
                 f"{self.user_id} | Error getting profile data | {resp['message']}"
@@ -64,8 +95,12 @@ class GoatsBot:
             return resp
 
     async def get_missions(self) -> list:
-        resp = await self.http.get("https://api-mission.goatsbot.xyz/missions/user")
+        resp = await self.http.get(
+            "https://api-mission.goatsbot.xyz/missions/user", proxy=Config.proxy or None
+        )
         resp = self.decode_json(await resp.text())
+        if Config.debug:
+            logger.debug(resp)
         if resp.get("statusCode"):
             logger.error(f"{self.user_id} | Error getting missions | {resp['message']}")
             return False
@@ -95,9 +130,12 @@ class GoatsBot:
 
     async def complete_mission(self, mission_data: dict) -> bool:
         resp = await self.http.post(
-            f"https://dev-api.goatsbot.xyz/missions/action/{mission_data['id']}"
+            f"https://dev-api.goatsbot.xyz/missions/action/{mission_data['id']}",
+            proxy=Config.proxy or None,
         )
         resp = self.decode_json(await resp.text())
+        if Config.debug:
+            logger.debug(resp)
         if resp.get("statusCode"):
             logger.error(
                 f"{self.user_id} | Error completing mission | {resp['message']}"
@@ -116,8 +154,12 @@ class GoatsBot:
                 return False
 
     async def get_checkin(self) -> dict:
-        resp = await self.http.get(f"https://api-checkin.goatsbot.xyz/checkin/user")
+        resp = await self.http.get(
+            f"https://api-checkin.goatsbot.xyz/checkin/user", proxy=Config.proxy or None
+        )
         resp = self.decode_json(await resp.text())
+        if Config.debug:
+            logger.debug(resp)
         if resp.get("statusCode"):
             logger.error(
                 f"{self.user_id} | Error getting check-in data | {resp['message']}"
@@ -130,9 +172,12 @@ class GoatsBot:
 
     async def checkin(self, checkin_data: dict) -> dict:
         resp = await self.http.post(
-            f"https://api-checkin.goatsbot.xyz/checkin/action/{checkin_data['_id']}"
+            f"https://api-checkin.goatsbot.xyz/checkin/action/{checkin_data['_id']}",
+            proxy=Config.proxy or None,
         )
         resp = self.decode_json(await resp.text())
+        if Config.debug:
+            logger.debug(resp)
         if resp.get("statusCode"):
             logger.error(f"{self.user_id} | Error checking in | {resp['message']}")
             return False
@@ -150,8 +195,11 @@ class GoatsBot:
         resp = await self.http.post(
             "https://api-wheel.goatsbot.xyz/wheel/action",
             json={"bet_amount": bet_amount, "wheel_seg": "Low"},
+            proxy=Config.proxy or None,
         )
         resp = self.decode_json(await resp.text())
+        if Config.debug:
+            logger.debug(resp)
         if resp.get("statusCode"):
             logger.error(
                 f"{self.user_id} | Error playing spin wheel | {resp['message']}"
@@ -180,7 +228,9 @@ class GoatsBot:
             logger.info(
                 f"Account ID: {self.user_id} | Balance: {profile_data.get('balance')} | Age: {profile_data.get('age')} years"
             )
-        if play_spin_wheel and min_amount_for_spin < int(profile_data.get("balance")):
+        if Config.play_spin_wheel and Config.min_amount_for_spin < int(
+            profile_data.get("balance")
+        ):
             current_balance = profile_data.get("balance")
             won, lost = 0, 0
             total_profit = 0
@@ -218,17 +268,21 @@ class GoatsBot:
 
 async def main():
     while True:
-        with open("data.txt", "r", encoding="utf-8") as file:
-            accounts = [line.strip() for line in file if line.strip()]
-        for _, auth_data in enumerate(accounts, start=1):
-            sleep_between_login = random.randint(10, 20)
-            logger.info(f"Sleeping for {sleep_between_login}s before login")
-            await asyncio.sleep(sleep_between_login)
-            logger.info(f"Account {_}/{len(accounts)}")
-            bot = GoatsBot(auth_data.strip())
-            await bot.run()
-        retry_sleep = random.randint(60, 90)
-        logger.info(f"Sleeping for {retry_sleep} minutes.")
+        for i in range(Config.no_of_login_b4_sleep):
+            with open("data.txt", "r", encoding="utf-8") as file:
+                accounts = [line.strip() for line in file if line.strip()]
+            for _, auth_data in enumerate(accounts, start=1):
+                sleep_between_login = random.randint(*Config.login_time_btwin_acc)
+                logger.info(f"Sleeping for {sleep_between_login}s before login")
+                await asyncio.sleep(sleep_between_login)
+                logger.info(f"Account {_}/{len(accounts)}")
+                bot = GoatsBot(auth_data.strip())
+                await bot.run()
+            __ = random.randint(*Config.soft_sleep)
+            logger.info(f"Soft sleeping for {__} minutes.")
+            await asyncio.sleep(__ * 60)
+        retry_sleep = random.randint(*Config.hard_sleep)
+        logger.info(f"Hard sleeping for {retry_sleep} minutes.")
         await asyncio.sleep(retry_sleep * 60)
 
 
